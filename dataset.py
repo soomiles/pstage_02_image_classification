@@ -181,3 +181,19 @@ class MaskMultiLabelDataset(MaskBaseDataset):
 
         image_transform = self.transform(image)
         return image_transform, mask_label, gender_label, age_label
+
+
+class MaskMultiClassDataset(MaskMultiLabelDataset):
+    @staticmethod
+    def map_multi_class(mask_label, gender_label, age_label):
+        return mask_label * 6 + gender_label * 3 + age_label
+
+    def __getitem__(self, index):
+        image = self.read_image(index)
+        mask_label = self.get_label(index)
+        gender_label = self.get_gender_label(index)
+        age_label = self.get_age_label(index)
+        multi_class_label = self.map_multi_class(mask_label, gender_label, age_label)
+
+        image_transform = self.transform(image)
+        return image_transform, multi_class_label
