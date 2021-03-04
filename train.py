@@ -9,6 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from dataset import MaskBaseDataset, MaskMultiClassDataset
 from model import *
+from metric import F1Meter
 
 
 def seed_everything(seed):
@@ -38,7 +39,7 @@ if __name__ == '__main__':
     lr_decay_step = 10
 
     train_log_interval = 20
-    name = "03_multiclass"
+    name = "03_01_multiclass_f1"
 
     # -- settings
     use_cuda = torch.cuda.is_available()
@@ -73,6 +74,7 @@ if __name__ == '__main__':
 
     # -- loss & metric
     criterion = nn.CrossEntropyLoss
+    evaluator = F1Meter(num_classes=num_classes)
     optimizer = Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=5e-4)
     scheduler = StepLR(optimizer, lr_decay_step, gamma=0.5)
     # metrics = []
@@ -101,26 +103,35 @@ if __name__ == '__main__':
 
             loss.backward()
             optimizer.step()
+            evaluator.update(outs, labels)
 
             loss_value += loss.item()
             matches += (preds == labels).sum().item()
             if (idx + 1) % train_log_interval == 0:
                 train_loss = loss_value / train_log_interval
-                train_acc = matches / batch_size / train_log_interval
+                # train_acc = matches / batch_size / train_log_interval
                 current_lr = optimizer.param_groups[0]['lr']
                 print(
                     f"Epoch[{epoch}/{num_epochs}]({idx + 1}/{len(train_loader)}) || "
-                    f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
+                    f"training loss {train_loss:4.4} || lr {current_lr}"
                 )
                 logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
-                logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
+                # logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
 
                 loss_value = 0
                 matches = 0
 
+        evaluator.calc_f1_score()
+        print(
+            f"Epoch[{epoch}/{num_epochs}] || "
+            f"training loss {train_loss:4.4} || training f1 score {evaluator.avg}|| lr {current_lr}"
+        )
+        logger.add_scalar("Train/accuracy", evaluator.avg, epoch * len(train_loader) + idx)
+
         scheduler.step()
 
         # val loop
+        evaluator.reset()
         with torch.no_grad():
             print("Calculating validation results...")
             model.eval()
@@ -137,15 +148,19 @@ if __name__ == '__main__':
                 loss_item = criterion(reduction='sum')(outs, labels).item()
                 acc_item = (labels == preds).sum().item()
                 val_loss_items.append(loss_item)
-                val_acc_items.append(acc_item)
+                # val_acc_items.append(acc_item)
+                evaluator.update(outs, labels)
 
             val_loss = np.sum(val_loss_items) / len(val_set)
-            val_acc = np.sum(val_acc_items) / len(val_set)
-            if val_loss < best_val_loss:
-                print("New best model for val loss! saving the model..")
-                torch.save(model.state_dict(), f"results/{name}/{epoch:03}_loss_{val_loss:4.2}.ckpt")
-                best_val_loss = val_loss
+            # val_acc = np.sum(val_acc_items) / len(val_set)
+            evaluator.calc_f1_score()
+            val_acc = evaluator.avg
+            # if val_loss < best_val_loss:
+            #     print("New best model for val loss! saving the model..")
+            #     torch.save(model.state_dict(), f"results/{name}/{epoch:03}_loss_{val_loss:4.2}.ckpt")
+            #     best_val_loss = val_loss
             if val_acc > best_val_acc:
+                print(evaluator.scores)
                 print("New best model for val accuracy! saving the model..")
                 torch.save(model.state_dict(), f"results/{name}/{epoch:03}_accuracy_{val_acc:4.2%}.ckpt")
                 best_val_acc = val_acc
