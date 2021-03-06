@@ -1,4 +1,4 @@
-# ustage_02_image_classification
+# pstage_02_image_classification
 
 ## Getting Started    
 ### Dependencies

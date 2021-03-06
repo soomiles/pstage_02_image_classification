@@ -55,7 +55,7 @@ class MaskBaseDataset(data.Dataset):
     image_paths = []
     labels = []
 
-    def __init__(self, img_root, label_path, phase="train", mean=[0.5366, 0.5323, 0.5183], std=[0.2456, 0.2517, 0.2605]):
+    def __init__(self, img_root, label_path, phase="train", mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
         self.img_root = img_root
         self.label_path = label_path
         self.phase = phase
@@ -92,7 +92,7 @@ class MaskBaseDataset(data.Dataset):
 
     def train_transform(self):
         return transforms.Compose([
-            Resize((128, 96), Image.BILINEAR),  # todo : img_size
+            Resize((96, 128), Image.BILINEAR),
             RandomRotation([-8, +8]),
             GaussianBlur(51, (0.1, 2.0)),
             ColorJitter(brightness=0.5, saturation=0.5, hue=0.5),  # todo : param
@@ -103,7 +103,7 @@ class MaskBaseDataset(data.Dataset):
 
     def test_transform(self):
         return transforms.Compose([
-            Resize((128, 96), Image.BILINEAR),
+            Resize((96, 128), Image.BILINEAR),
             ToTensor(),
             Normalize(mean=self.mean, std=self.std),
         ])
@@ -144,7 +144,11 @@ class MaskMultiLabelDataset(MaskBaseDataset):
         male = 0
         female = 1
 
+    class AgeGroup:
+        map_label = lambda x: 0 if int(x) < 30 else 1 if int(x) < 60 else 2
+
     gender_labels = []
+    age_labels = []
 
     def setup(self):
         df = pd.read_csv(self.label_path)  # "../upstage/metadata.csv"
@@ -158,16 +162,38 @@ class MaskMultiLabelDataset(MaskBaseDataset):
 
                     id, gender, race, age = profile.split("_")
                     gender_label = getattr(self.GenderLabels, gender)
+                    age_label = self.AgeGroup.map_label(age)
+
                     self.gender_labels.append(gender_label)
+                    self.age_labels.append(age_label)
 
     def get_gender_label(self, index):
         return self.gender_labels[index]
 
+    def get_age_label(self, index):
+        return self.age_labels[index]
+
     def __getitem__(self, index):
         image = self.read_image(index)
-        base_label = self.get_label(index)
+        mask_label = self.get_label(index)
         gender_label = self.get_gender_label(index)
+        age_label = self.get_age_label(index)
 
         image_transform = self.transform(image)
-        labels = np.array([base_label, gender_label])
-        return image_transform, labels
+        return image_transform, mask_label, gender_label, age_label
+
+
+class MaskMultiClassDataset(MaskMultiLabelDataset):
+    @staticmethod
+    def map_multi_class(mask_label, gender_label, age_label):
+        return mask_label * 6 + gender_label * 3 + age_label
+
+    def __getitem__(self, index):
+        image = self.read_image(index)
+        mask_label = self.get_label(index)
+        gender_label = self.get_gender_label(index)
+        age_label = self.get_age_label(index)
+        multi_class_label = self.map_multi_class(mask_label, gender_label, age_label)
+
+        image_transform = self.transform(image)
+        return image_transform, multi_class_label
