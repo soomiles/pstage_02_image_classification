@@ -8,7 +8,7 @@ from torch.optim import Adam
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.tensorboard import SummaryWriter
 
-from dataset import MaskBaseDataset
+from dataset import MaskMultiClassDataset
 from model import *
 from loss import create_criterion
 
@@ -26,9 +26,11 @@ def seed_everything(seed):
 if __name__ == '__main__':
     seed_everything(42)
 
-    # -- parameters
-    img_root = os.getenv("IMG_ROOT")
-    label_path = os.getenv("LABEL_PATH")
+    data_dir = '/mnt/ssd/data/mask/mask_final/train'  # os.environ['SM_CHANNEL_TRAIN']
+    model_dir = './results'  # os.environ['SM_MODEL_DIR']
+
+    img_root = os.path.join(data_dir, 'images')
+    label_path = os.path.join(data_dir, 'train.csv')
 
     model_name = "VGG19"
     use_pretrained = True
@@ -36,16 +38,15 @@ if __name__ == '__main__':
 
     val_split = 0.4
     batch_size = 64
-    num_workers = 8
-    num_classes = 3
+    num_workers = 4
+    num_classes = 18
 
     num_epochs = 100
     lr = 1e-4
     lr_decay_step = 10
-    criterion_name = 'label_smoothing'
+    criterion_name = 'cross_entropy'
 
     train_log_interval = 20
-    name = "02_vgg"
 
     # -- settings
     use_cuda = torch.cuda.is_available()
@@ -60,11 +61,11 @@ if __name__ == '__main__':
     ).to(device)
 
     # -- data_loader
-    dataset = MaskBaseDataset(img_root, label_path, 'train')
+    dataset = MaskMultiClassDataset(img_root, label_path, 'train')
     n_val = int(len(dataset) * val_split)
     n_train = len(dataset) - n_val
     train_set, val_set = torch.utils.data.random_split(dataset, [n_train, n_val])
-    val_set.dataset.set_phase("test")  # todo : fix
+    val_set.dataset.set_phase("test")
 
     train_loader = torch.utils.data.DataLoader(
         train_set,
@@ -88,10 +89,11 @@ if __name__ == '__main__':
     # callbacks = []
 
     # -- logging
-    logger = SummaryWriter(log_dir=f"results/{name}")
+    logger = SummaryWriter(log_dir=model_dir)
 
     best_val_acc = 0
     best_val_loss = np.inf
+    best_checkpoint_path = os.path.join(model_dir, 'best_checkpoint.ckpt')
     for epoch in range(num_epochs):
         # train loop
         model.train()
@@ -111,12 +113,12 @@ if __name__ == '__main__':
             loss.backward()
             optimizer.step()
 
-            loss_value += loss.item()
+            loss_value += (loss.item() * len(train_batch))
             matches += (preds == labels).sum().item()
             if (idx + 1) % train_log_interval == 0:
                 train_loss = loss_value / train_log_interval
                 train_acc = matches / batch_size / train_log_interval
-                current_lr = scheduler.get_last_lr()
+                current_lr = optimizer.param_groups[0]['lr']
                 print(
                     f"Epoch[{epoch}/{num_epochs}]({idx + 1}/{len(train_loader)}) || "
                     f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
@@ -126,7 +128,6 @@ if __name__ == '__main__':
 
                 loss_value = 0
                 matches = 0
-
         scheduler.step()
 
         # val loop
@@ -151,12 +152,10 @@ if __name__ == '__main__':
             val_loss = np.sum(val_loss_items) / len(val_loader)
             val_acc = np.sum(val_acc_items) / len(val_set)
             if val_loss < best_val_loss:
-                print("New best model for val loss! saving the model..")
-                torch.save(model.state_dict(), f"results/{name}/{epoch:03}_loss_{val_loss:4.2}.ckpt")
                 best_val_loss = val_loss
             if val_acc > best_val_acc:
                 print("New best model for val accuracy! saving the model..")
-                torch.save(model.state_dict(), f"results/{name}/{epoch:03}_accuracy_{val_acc:4.2%}.ckpt")
+                torch.save(model.state_dict(), best_checkpoint_path)
                 best_val_acc = val_acc
             print(
                 f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "

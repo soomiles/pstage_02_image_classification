@@ -197,3 +197,23 @@ class MaskMultiClassDataset(MaskMultiLabelDataset):
 
         image_transform = self.transform(image)
         return image_transform, multi_class_label
+
+
+class TestDataset(data.Dataset):
+    def __init__(self, img_paths, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
+        self.img_paths = img_paths
+        self.transform = transforms.Compose([
+            Resize((96, 128), Image.BILINEAR),
+            ToTensor(),
+            Normalize(mean=mean, std=std),
+        ])
+
+    def __getitem__(self, index):
+        image = Image.open(self.img_paths[index])
+
+        if self.transform:
+            image = self.transform(image)
+        return image
+
+    def __len__(self):
+        return len(self.img_paths)
