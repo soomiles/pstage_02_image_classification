@@ -55,11 +55,11 @@ def train(data_dir, model_dir, args):
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # -- dataset
-    dataset_cls = getattr(import_module("dataset"), args.dataset)  # default: MaskMultiClassDataset
+    dataset_cls = getattr(import_module("dataset"), args.dataset)  # default: MaskDataset
     dataset = dataset_cls(
-        data_dir=data_dir,
+        data_dir=data_dir
     )
-    num_classes = dataset.num_classes  # 3 if MaskBaseDataset, 8 if MaskMultiLabelDataset, 18 if MaskMultiClassDataset
+    num_classes = dataset.num_classes  # 18 MaskDataset
 
     # -- augmentation
     transform_cls = getattr(import_module("dataset"), args.augmentation)  # default: BaseAugmentation
@@ -197,7 +197,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=1, help='number of epochs to train (default: 1)')
     parser.add_argument('--augmentation', type=str, default='BaseAugmentation', help='data augmentation type (default: BaseAugmentation)')
     parser.add_argument('--resize', type=tuple, default=(96, 128), help='resize size for image when training (default: (96, 128))')
-    parser.add_argument('--dataset', type=str, default='MaskMultiClassDataset', help='dataset type (default: MaskMultiClassDataset)')
+    parser.add_argument('--dataset', type=str, default='MaskDataset', help='dataset type (default: MaskDataset)')
     parser.add_argument('--batch_size', type=int, default=64, help='input batch size for training (default: 64)')
     parser.add_argument('--valid_batch_size', type=int, default=1000, help='input batch size for validing (default: 1000)')
     parser.add_argument('--model', type=str, default='BaseModel', help='model type (default: BaseModel)')

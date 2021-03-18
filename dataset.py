@@ -1,6 +1,7 @@
 import os
-
+from glob import glob
 import numpy as np
+import pandas as pd
 import torch
 import torch.utils.data as data
 from PIL import Image
@@ -63,29 +64,28 @@ class AugmentationWithGaussianNoise:
         return self.transform(image)
 
 
-class MaskBaseDataset(data.Dataset):
-    num_classes = 3
+class MaskDataset(data.Dataset):
+    num_classes = 18
 
-    class Labels:
+    class MaskLabels:
         mask = 0
-        incorrect = 1
+        incorrect_mask = 1
         normal = 2
 
-    _file_names = {
-        "mask1.jpg": Labels.mask,
-        "mask2.jpg": Labels.mask,
-        "mask3.jpg": Labels.mask,
-        "mask4.jpg": Labels.mask,
-        "mask5.jpg": Labels.mask,
-        "incorrect_mask.jpg": Labels.incorrect,
-        "normal.jpg": Labels.normal
-    }
+    class GenderLabels:
+        male = 0
+        female = 1
+
+    class AgeGroup:
+        map_label = lambda x: 0 if int(x) < 30 else 1 if int(x) < 60 else 2
 
     image_paths = []
     labels = []
 
     def __init__(self, data_dir, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
-        self.data_dir = data_dir
+        self.image_dir = os.path.join(data_dir, 'images')
+        self.df = pd.read_csv(os.path.join(data_dir, 'train.csv'))
+
         self.mean = mean
         self.std = std
         self.transform = BaseAugmentation((96, 128), mean, std)
@@ -94,18 +94,30 @@ class MaskBaseDataset(data.Dataset):
         self.calc_statistics()
 
     def setup(self):
-        profiles = os.listdir(self.data_dir)
-        for profile in profiles:
-            for file_name, label in self._file_names.items():
-                img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
-                if os.path.exists(img_path) and is_image_file(img_path):
-                    self.image_paths.append(img_path)
-                    self.labels.append(label)
+        for idx, row in self.df.iterrows():
+            self.image_paths.extend(glob(os.path.join(self.image_dir, row['path'],
+                                                      '*')))  # /mnt/ssd/data/mask/train/images/000001_female_Asian_45/*
+        self.image_paths = list(filter(is_image_file, self.image_paths))
+        self.labels = [0] * len(self.image_paths)
+
+        for idx in range(len(self.image_paths)):
+            image_path = self.image_paths[idx]
+            filename = os.path.basename(image_path)
+            filename = os.path.splitext(filename)[0]  # mask3
+            filename = ''.join([i for i in filename if not i.isdigit()])  # mask
+            mask_label = getattr(self.MaskLabels, filename)
+
+            profile = image_path.split('/')[-2]  # 000001_female_Asian_45
+            image_id, gender, race, age = profile.split("_")
+            gender_label = getattr(self.GenderLabels, gender)
+            age_label = self.AgeGroup.map_label(age)
+            self.labels[idx] = mask_label * 6 + gender_label * 3 + age_label
 
     def calc_statistics(self):
         has_statistics = self.mean is not None and self.std is not None
         if not has_statistics:
-            print("[Warning] Calculating statistics... It can takes huge amounts of time depending on your CPU machine :(")
+            print(
+                "[Warning] Calculating statistics... It can takes huge amounts of time depending on your CPU machine :(")
             sums = []
             squared = []
             for image_path in self.image_paths[:3000]:
@@ -135,69 +147,6 @@ class MaskBaseDataset(data.Dataset):
     def read_image(self, index):
         image_path = self.image_paths[index]
         return Image.open(image_path)
-
-
-class MaskMultiLabelDataset(MaskBaseDataset):
-    num_classes = 3 + 2 + 3
-
-    class GenderLabels:
-        male = 0
-        female = 1
-
-    class AgeGroup:
-        map_label = lambda x: 0 if int(x) < 30 else 1 if int(x) < 60 else 2
-
-    gender_labels = []
-    age_labels = []
-
-    def setup(self):
-        profiles = os.listdir(self.data_dir)
-        for profile in profiles:
-            for file_name, label in self._file_names.items():
-                img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
-                if os.path.exists(img_path) and is_image_file(img_path):
-                    self.image_paths.append(img_path)
-                    self.labels.append(label)
-
-                    id, gender, race, age = profile.split("_")
-                    gender_label = getattr(self.GenderLabels, gender)
-                    age_label = self.AgeGroup.map_label(age)
-
-                    self.gender_labels.append(gender_label)
-                    self.age_labels.append(age_label)
-
-    def get_gender_label(self, index):
-        return self.gender_labels[index]
-
-    def get_age_label(self, index):
-        return self.age_labels[index]
-
-    def __getitem__(self, index):
-        image = self.read_image(index)
-        mask_label = self.get_label(index)
-        gender_label = self.get_gender_label(index)
-        age_label = self.get_age_label(index)
-
-        image_transform = self.transform(image)
-        return image_transform, mask_label, gender_label, age_label
-
-
-class MaskMultiClassDataset(MaskMultiLabelDataset):
-    num_classes = 3 * 2 * 3
-
-    @staticmethod
-    def map_multi_class(mask_label, gender_label, age_label):
-        return mask_label * 6 + gender_label * 3 + age_label
-
-    def __getitem__(self, index):
-        image = self.read_image(index)
-        mask_label = self.get_label(index)
-        gender_label = self.get_gender_label(index)
-        age_label = self.get_age_label(index)
-        multi_class_label = self.map_multi_class(mask_label, gender_label, age_label)
-
-        image_transform = self.transform(image)
-        return image_transform, multi_class_label
 
 
 class TestDataset(data.Dataset):
